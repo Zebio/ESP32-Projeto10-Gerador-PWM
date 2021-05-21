@@ -4,6 +4,7 @@
 #include "freertos/event_groups.h"  //grupo de eventos
 #include "nvs_flash.h"              //memória nvs
 #include "driver/ledc.h"            //PWM
+#include <math.h>
 
 
 
@@ -23,29 +24,29 @@ tentar ao se conectar à rede Wireless*/
 #define ESP_MAXIMUM_RETRY  10
 
 
+//Definições de ambos PWMs:
+#define PWM_res_inicial LEDC_TIMER_13_BIT      //13 bits de resolução inicial
+#define PWM_Modo        LEDC_HIGH_SPEED_MODE   //Modo High speed
+#define PWM_Clock       LEDC_USE_APB_CLK       //A fonte de clock do timer. APB_CLK = 80MHz
+
 //Definições do PWM 0:
-#define PWM0_res_inicial LEDC_TIMER_13_BIT      //13 bits de resolução inicial
 #define PWM0_Timer       LEDC_TIMER_0           //timer 0 para o PWM0
-#define PWM0_Modo        LEDC_HIGH_SPEED_MODE   //Modo High speed
-#define PWM0_Clock       LEDC_USE_APB_CLK       //A fonte de clock do timer. APB_CLK = 80MHz
 #define PWM0_Canal       LEDC_CHANNEL_0         //PWM0->Timer0->Canal0
 #define PWM0_Gpio        18                     //PWM0->Timer0->Canal0->Gpio18
 
 //Definições do PWM 1:
-#define PWM1_res_inicial LEDC_TIMER_13_BIT      //13 bits de resolução inicial
 #define PWM1_Timer       LEDC_TIMER_1           //timer 1 para o PWM0
-#define PWM1_Modo        LEDC_HIGH_SPEED_MODE   //Modo High speed
-#define PWM1_Clock       LEDC_USE_APB_CLK       //A fonte de clock do timer. APB_CLK = 80MHz
 #define PWM1_Canal       LEDC_CHANNEL_1         //PWM1->Timer1->Canal1
 #define PWM1_Gpio        19                     //PWM1->Timer1->Canal1->Gpio19
 
-#define Timers_Source_Speed = 80000000 //80 MHZ
+
 
 
 /*-----------------------------------------------Constantes de Projeto --------------------------------------*/
 
-static const char *TAG = "ESP";     //A tag que será impressa no log do sistema 
+static const char *TAG = "ESP";             //A tag que será impressa no log do sistema 
 
+const int Timers_Source_Speed = 80000000;   //80 MHZ
 
 
 
@@ -57,8 +58,8 @@ static uint32_t numero_tentativa_de_conexao_wifi = 0;   //numero atual da tentat
 static uint32_t PWM0_freq = 5000;       //frequencia em Hertz
 static uint32_t PWM1_freq = 5000;       //frequencia em Hertz
 
-static uint32_t PWM0_duty = 0;          //porcentagem do ciclo positivo do duty
-static uint32_t PWM1_duty = 0;          //porcentagem do ciclo positivo do duty
+//static uint32_t PWM0_duty = 0;          //porcentagem do ciclo positivo do duty
+//static uint32_t PWM1_duty = 0;          //porcentagem do ciclo positivo do duty
 
 
 /*----------------------------------------------------Objetos------------------------------------------------*/
@@ -67,7 +68,7 @@ static uint32_t PWM1_duty = 0;          //porcentagem do ciclo positivo do duty
 static EventGroupHandle_t s_wifi_event_group;
 
 //Declaração do server http
-static httpd_handle_t server =NULL;
+//static httpd_handle_t server =NULL;
 
 
 /*-----------------------------------------------Declaração das Funções--------------------------------------*/
@@ -86,6 +87,8 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 
 static void atualiza_PWM(); //Atualiza os valores de resolução do duty, frequencia e duty cicle
 
+static int log_base2(int valor);
+
 
 
 
@@ -95,7 +98,7 @@ void app_main() {
     wifi_init_sta();
 
     //durante a execução:
-    atualiza_PWM();
+    atualiza_PWM(0,0,0);
 
 
 
@@ -108,28 +111,28 @@ void app_main() {
 //Realiza as configurações iniciais do PWM.
 static void setup_PWM(){
     ledc_timer_config_t pwm0_config = { //Configurações do PWM0
-        .duty_resolution =   PWM0_res_inicial,                  // resolution of PWM duty
+        .duty_resolution =   PWM_res_inicial,                  // resolution of PWM duty
         .freq_hz =           PWM0_freq,                         // frequency of PWM signal
-        .speed_mode =        PWM0_Modo,                         // timer mode
+        .speed_mode =        PWM_Modo,                         // timer mode
         .timer_num =         PWM0_Timer,                        // timer index
-        .clk_cfg =           PWM0_Clock,                        // clock source
+        .clk_cfg =           PWM_Clock,                        // clock source
     };
     // Aplicar a configuração do PWM0
     ledc_timer_config(&pwm0_config);
 
     ledc_timer_config_t pwm1_config = { //Configurações do PWM1
-        .duty_resolution =   PWM1_res_inicial,                  // resolution of PWM duty
+        .duty_resolution =   PWM_res_inicial,                  // resolution of PWM duty
         .freq_hz =           PWM1_freq,                         // frequency of PWM signal
-        .speed_mode =        PWM1_Modo,                         // timer mode
+        .speed_mode =        PWM_Modo,                         // timer mode
         .timer_num =         PWM1_Timer,                        // timer index
-        .clk_cfg =           PWM1_Clock,                        // clock source
+        .clk_cfg =           PWM_Clock,                        // clock source
     };
     // Aplicar a configuração do PWM1
     ledc_timer_config(&pwm1_config);
 
     ledc_channel_config_t pwm0_ch_config = {
         .gpio_num = PWM0_Gpio,
-        .speed_mode = PWM0_Modo,
+        .speed_mode = PWM_Modo,
         .channel =PWM0_Canal,
         .intr_type = 0,
         .timer_sel = PWM0_Timer,
@@ -141,7 +144,7 @@ static void setup_PWM(){
 
     ledc_channel_config_t pwm1_ch_config = {
         .gpio_num = PWM1_Gpio,
-        .speed_mode = PWM1_Modo,
+        .speed_mode = PWM_Modo,
         .channel =PWM1_Canal,
         .intr_type = 0,
         .timer_sel = PWM1_Timer,
@@ -152,29 +155,39 @@ static void setup_PWM(){
     ledc_channel_config(&pwm1_ch_config);
 }
 
+//retorna o log na base 2 do valor recebido
+static int log_base2(int valor){
+    return (log(valor)/log(2));
 
-static void atualiza_PWM(){
+}
+
+static void atualiza_PWM(int canal,uint32_t frequencia,uint32_t duty_cicle){
 
     //PWM Resolution(bits)= log2 (   PWMFreq    )
     //                             -------------
     //                             timer_clk_freq
- 
- /* Duty Resolution (bits)  
-    ledc_timer_set();
-*/
+    int resolucao_duty= log_base2(frequencia/Timers_Source_Speed);
+    int timer;
+    if(canal==PWM0_Canal)
+        timer=PWM0_Timer;                         
+    else 
+        timer=PWM1_Timer;
 
-    /* Atualiza Frequência
-    ledc_set_freq()
-    */
+    //Altera a Duty Resolution (bits)  
+    ledc_timer_set(PWM_Modo,timer,1,resolucao_duty,PWM_Clock);
 
-   /* Atualiza o duty cicle
-   ledc_set_duty()
-   */
 
-  /* Aplica as configurações do Duty
-  ledc_update_duty()
-  */
+    //Atualiza Frequência
+    ledc_set_freq(PWM_Modo,timer,frequencia);
 
+    uint32_t duty = pow(2,resolucao_duty)*(duty_cicle/100);
+  
+    // Atualiza o duty cicle
+    ledc_set_duty(PWM_Modo,canal,duty);
+
+
+    // Aplica as configurações do Duty
+    ledc_update_duty(PWM_Modo,canal);
 }
 
 
