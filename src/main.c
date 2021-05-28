@@ -108,13 +108,14 @@ void app_main() {
 
 /*-------------------------------------Implementação das Funções----------------------------------------------*/
 
-//Realiza as configurações iniciais do PWM.
+//Realiza as configurações iniciais do PWM baseado na documentação de Espressiv:
+//https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/ledc.html
 static void setup_PWM(){
     ledc_timer_config_t pwm0_config = { //Configurações do PWM0
         .duty_resolution =   PWM_res_inicial,                  // resolution of PWM duty
-        .freq_hz =           PWM0_freq,                         // frequency of PWM signal
+        .freq_hz =           PWM0_freq,                        // frequency of PWM signal
         .speed_mode =        PWM_Modo,                         // timer mode
-        .timer_num =         PWM0_Timer,                        // timer index
+        .timer_num =         PWM0_Timer,                       // timer index
         .clk_cfg =           PWM_Clock,                        // clock source
     };
     // Aplicar a configuração do PWM0
@@ -127,45 +128,50 @@ static void setup_PWM(){
         .timer_num =         PWM1_Timer,                        // timer index
         .clk_cfg =           PWM_Clock,                        // clock source
     };
-    // Aplicar a configuração do PWM1
+    // Aplicar a configuração do timer do PWM1
     ledc_timer_config(&pwm1_config);
 
+    //Configurações do canal do PWM0
     ledc_channel_config_t pwm0_ch_config = {
-        .gpio_num = PWM0_Gpio,
-        .speed_mode = PWM_Modo,
-        .channel =PWM0_Canal,
-        .intr_type = 0,
-        .timer_sel = PWM0_Timer,
-        .duty =0,
-        .hpoint =0,
+        .gpio_num = PWM0_Gpio,                                  //Gpio de saída do sinal PWM
+        .speed_mode = PWM_Modo,                                 //modo do PWM
+        .channel =PWM0_Canal,                                   //Canal do PWM
+        .intr_type = 0,                                         //interrupções desabilitadas
+        .timer_sel = PWM0_Timer,                                //qual timer está asociado a esse canal
+        .duty =0,                                               //duty cicle inicial
+        .hpoint =0,         
     };
 
+    // Aplicar a configuração do Canal do PWM0
     ledc_channel_config(&pwm0_ch_config);
 
+    //Configurações do canal do PWM1
     ledc_channel_config_t pwm1_ch_config = {
-        .gpio_num = PWM1_Gpio,
-        .speed_mode = PWM_Modo,
-        .channel =PWM1_Canal,
-        .intr_type = 0,
-        .timer_sel = PWM1_Timer,
-        .duty =0,
+        .gpio_num = PWM1_Gpio,                                  //Gpio de saída do sinal PWM
+        .speed_mode = PWM_Modo,                                 //modo do PWM
+        .channel =PWM1_Canal,                                   //Canal do PWM
+        .intr_type = 0,                                         //interrupções desabilitadas
+        .timer_sel = PWM1_Timer,                                //qual timer está asociado a esse canal
+        .duty =0,                                               //duty cicle inicial
         .hpoint =0,
     };
 
+    // Aplicar a configuração do Canal do PWM1
     ledc_channel_config(&pwm1_ch_config);
 }
 
 //retorna o log na base 2 do valor recebido
 static int log_base2(int valor){
     return (log(valor)/log(2));
-
 }
 
+//Atualiza o sinal PWM baseado no canal selecionado, na frequência pedida e na porcentagem do duty
 static void atualiza_PWM(int canal,uint32_t frequencia,uint32_t duty_cicle){
 
     //PWM Resolution(bits)= log2 (   PWMFreq    )
     //                             -------------
     //                             timer_clk_freq
+
     int resolucao_duty= log_base2(frequencia/Timers_Source_Speed);
     int timer;
     if(canal==PWM0_Canal)
@@ -173,20 +179,19 @@ static void atualiza_PWM(int canal,uint32_t frequencia,uint32_t duty_cicle){
     else 
         timer=PWM1_Timer;
 
-    //Altera a Duty Resolution (bits)  
+    //aplica a Resolução do Duty(bits) no timer correto  
     ledc_timer_set(PWM_Modo,timer,1,resolucao_duty,PWM_Clock);
 
-
-    //Atualiza Frequência
+    //Atualiza Frequência no timer correto
     ledc_set_freq(PWM_Modo,timer,frequencia);
 
+    //transforma o valor do duty de percentual para bits
     uint32_t duty = pow(2,resolucao_duty)*(duty_cicle/100);
   
-    // Atualiza o duty cicle
+    // Atualiza o duty cicle do canal
     ledc_set_duty(PWM_Modo,canal,duty);
 
-
-    // Aplica as configurações do Duty
+    // Aplica as configurações
     ledc_update_duty(PWM_Modo,canal);
 }
 
