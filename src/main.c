@@ -55,6 +55,16 @@ const int Timers_Source_Speed = 80000000;   //80 MHZ
 static uint32_t numero_tentativa_de_conexao_wifi = 0;   //numero atual da tentativa de se conectar a rede,
                                                         //tentativas máximas= EXAMPLE_ESP_MAXIMUM_RETRY
 
+
+struct Config_PWM
+{
+    bool                     estado; //ligado =1 , desligado=0
+    uint32_t             frequencia; //frequencia do PWM   
+    uint8_t   percentual_duty_cicle; //ciclo alto do PWM de 0 a 100%
+};
+
+
+
 static uint32_t PWM0_freq = 5000;       //frequencia em Hertz
 static uint32_t PWM1_freq = 5000;       //frequencia em Hertz
 
@@ -73,7 +83,9 @@ static EventGroupHandle_t s_wifi_event_group;
 
 /*-----------------------------------------------Declaração das Funções--------------------------------------*/
 
-static void setup_PWM();     //Realiza as configurações iniciais do PWM.
+static void inicializa_variaveis(Config_PWM  pwm0,Config_PWM  pwm1);
+
+static void setup_PWM(Config_PWM  pwm0,Config_PWM  pwm1);     //Realiza as configurações iniciais do PWM.
 
 static void setup_nvs();     //Inicia a memória nvs. Ela é necessária para se conectar à rede Wireless
 
@@ -85,7 +97,7 @@ void wifi_init_sta(); //Configura a rede wireless
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data);
 
-static void atualiza_PWM(); //Atualiza os valores de resolução do duty, frequencia e duty cicle
+static void atualiza_PWM(Config_PWM); //Atualiza os valores de resolução do duty, frequencia e duty cicle
 
 static int log_base2(int valor);
 
@@ -93,7 +105,10 @@ static int log_base2(int valor);
 
 
 void app_main() {
-    setup_PWM();
+    struct Config_PWM  pwm0;
+    struct Config_PWM  pwm1;
+    inicializa_variaveis(pwm0,pwm1);
+    setup_PWM(pwm0,pwm1);
     setup_nvs();
     wifi_init_sta();
 
@@ -108,9 +123,24 @@ void app_main() {
 
 /*-------------------------------------Implementação das Funções----------------------------------------------*/
 
+static void inicializa_variaveis(Config_PWM  pwm0,Config_PWM  pwm1)
+{
+    pwm0.estado=0;
+    pwm0.frequencia=1000;
+    pwm0.percentual_duty_cicle=50;
+
+    pwm1.estado=0;
+    pwm1.frequencia=1000;
+    pwm1.percentual_duty_cicle=50;
+}
+
+
+
+
 //Realiza as configurações iniciais do PWM baseado na documentação de Espressiv:
 //https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/ledc.html
-static void setup_PWM(){
+static void setup_PWM(Config_PWM  pwm0,Config_PWM  pwm1){
+
     ledc_timer_config_t pwm0_config = { //Configurações do PWM0
         .duty_resolution =   PWM_res_inicial,                  // resolution of PWM duty
         .freq_hz =           PWM0_freq,                        // frequency of PWM signal
