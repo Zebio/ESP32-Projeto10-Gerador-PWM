@@ -103,14 +103,13 @@ void app_main() {
     while(true)
     {
         pwm0.percentual_duty_cicle =0;
+        pwm0.frequencia= 100000;
         atualiza_PWM(pwm0);
-        vTaskDelay(50000 / portTICK_RATE_MS);
-        pwm0.percentual_duty_cicle =50;
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        pwm0.percentual_duty_cicle =25;
+        pwm0.frequencia= 1000;
         atualiza_PWM(pwm0);
-        vTaskDelay(50000 / portTICK_RATE_MS);
-        pwm0.percentual_duty_cicle =100;
-        atualiza_PWM(pwm0);
-        vTaskDelay(50000 / portTICK_RATE_MS);
+        vTaskDelay(2000 / portTICK_RATE_MS);
     }
 
     //durante a execução:
@@ -183,9 +182,7 @@ static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq)
     //                           |      timer_clk_freq   |
 {
     long double frac = pwm_freq/timer_clk_freq;
-    ESP_LOGI(TAG, "Função recebeu freq: %LG clk: %LG, frac: %LG\n",pwm_freq,timer_clk_freq,frac);
     long double retorno= (logl(frac)/logl(2));
-    ESP_LOGI(TAG,"retorno %LE",retorno);
     return abs((int)retorno);
 }
 
@@ -205,7 +202,11 @@ static void atualiza_PWM(struct parametros_PWM pwm){
 
     int resolucao_duty= calc_resolucao_duty(pwm.frequencia,timer_clk_freq);
 
-    ESP_LOGI(TAG,"res_final %d",resolucao_duty);
+    ESP_LOGI(TAG,"Atualizar PWM: Freq: %d, Duty: %d, Resolução: %d",
+            pwm.frequencia,
+            pwm.percentual_duty_cicle,
+            resolucao_duty);
+
     //aplica a Resolução do Duty(bits) no timer correto  
     ledc_timer_set(pwm.speed_mode,pwm.timer,1,resolucao_duty,pwm.clock);
 
@@ -213,7 +214,7 @@ static void atualiza_PWM(struct parametros_PWM pwm){
     ledc_set_freq(pwm.speed_mode,pwm.timer,pwm.frequencia);
 
     //transforma o valor do duty de percentual para bits
-    uint32_t duty = pow(2,resolucao_duty)*(pwm.percentual_duty_cicle/100);
+    uint32_t duty = pow(2,resolucao_duty)*((double)pwm.percentual_duty_cicle/100);
   
     // Atualiza o duty cicle do canal
     ledc_set_duty(pwm.speed_mode,pwm.canal,duty);
