@@ -86,7 +86,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
 
 static void atualiza_PWM(struct parametros_PWM pwm); //Atualiza os valores de resolução do duty, frequencia e duty cicle
 
-static int log_base2(int valor);
+static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq);
 
 
 
@@ -100,8 +100,21 @@ void app_main() {
     setup_nvs();
     wifi_init_sta();
 
+    while(true)
+    {
+        pwm0.percentual_duty_cicle =0;
+        atualiza_PWM(pwm0);
+        vTaskDelay(50000 / portTICK_RATE_MS);
+        pwm0.percentual_duty_cicle =50;
+        atualiza_PWM(pwm0);
+        vTaskDelay(50000 / portTICK_RATE_MS);
+        pwm0.percentual_duty_cicle =100;
+        atualiza_PWM(pwm0);
+        vTaskDelay(50000 / portTICK_RATE_MS);
+    }
+
     //durante a execução:
-    atualiza_PWM(pwm0);
+    //atualiza_PWM(pwm0);
 }
 
 /*-------------------------------------Implementação das Funções----------------------------------------------*/
@@ -162,8 +175,18 @@ static void setup_PWM(struct parametros_PWM  pwm){
 }
 
 //retorna o log na base 2 do valor recebido
-static int log_base2(int valor){
-    return (log(valor)/log(2));
+static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq)
+
+
+    //PWM duty Resolution(bits)= |log2 (   PWMFreq      )|
+    //                           |      --------------   |
+    //                           |      timer_clk_freq   |
+{
+    long double frac = pwm_freq/timer_clk_freq;
+    ESP_LOGI(TAG, "Função recebeu freq: %LG clk: %LG, frac: %LG\n",pwm_freq,timer_clk_freq,frac);
+    long double retorno= (logl(frac)/logl(2));
+    ESP_LOGI(TAG,"retorno %LE",retorno);
+    return abs((int)retorno);
 }
 
 //Atualiza o sinal PWM baseado no canal selecionado, na frequência pedida e na porcentagem do duty
@@ -180,13 +203,9 @@ static void atualiza_PWM(struct parametros_PWM pwm){
         timer_clk_freq=80000000;
     }
 
+    int resolucao_duty= calc_resolucao_duty(pwm.frequencia,timer_clk_freq);
 
-    //PWM duty Resolution(bits)= log2 (   PWMFreq    )
-    //                             -------------
-    //                             timer_clk_freq
-
-    int resolucao_duty= log_base2(pwm.frequencia/timer_clk_freq);
-
+    ESP_LOGI(TAG,"res_final %d",resolucao_duty);
     //aplica a Resolução do Duty(bits) no timer correto  
     ledc_timer_set(pwm.speed_mode,pwm.timer,1,resolucao_duty,pwm.clock);
 
