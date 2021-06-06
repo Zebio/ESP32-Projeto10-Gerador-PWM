@@ -65,7 +65,10 @@ typedef struct parametros_PWM
 static EventGroupHandle_t s_wifi_event_group;
 
 //Declaração do server http
-//static httpd_handle_t server =NULL;
+static httpd_handle_t server =NULL;
+
+
+
 
 
 /*-----------------------------------------------Declaração das Funções--------------------------------------*/
@@ -88,19 +91,39 @@ static void atualiza_PWM(struct parametros_PWM pwm); //Atualiza os valores de re
 
 static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq);
 
+//Cria o Server, Faz as configurações Padrão e Inicia os URI Handlers para os GETs
+static httpd_handle_t start_webserver(void);
+
+//Imprimimos a Webpage
+static void print_webpage(httpd_req_t *req);
+
+//handler do Get da Página Principal
+static esp_err_t main_page_get_handler(httpd_req_t *req);
+
+static void cria_delay(void *pvParameter);
 
 
+/*--------------------------------------Declaração dos GETs do http------------------------------------------*/
+//a declaração do GET da página Principal
+static const httpd_uri_t main_page = {
+    .uri       = "/",
+    .method    = HTTP_GET,
+    .handler   = main_page_get_handler,
+    .user_ctx  = NULL
+};
 
+
+    struct parametros_PWM  pwm0,pwm1;   //cria a struct com os parametros do pwm
 void app_main() {
-    struct parametros_PWM  pwm0;
-    struct parametros_PWM  pwm1;
-    inicializa_variaveis(&pwm0,&pwm1);
-    setup_PWM(pwm0);
-    setup_PWM(pwm1);
-    setup_nvs();
-    wifi_init_sta();
+    inicializa_variaveis(&pwm0,&pwm1);  //inicializa variaveis como frequencia, duty cicle.. etc
+    setup_PWM(pwm0);                    //configura os canais e timers do PWM0
+    setup_PWM(pwm1);                    //configura os canais e timers do PWM1
+    setup_nvs();                        //inicia a memória nvs necessária para uso do wireless
+    wifi_init_sta();                    //inicia o wireless e se conecta à rede
+    server = start_webserver();   //configura e inicia o server
+    xTaskCreate(&cria_delay, "cria_delay", 512,NULL,5,NULL );
 
-    while(true)
+    /*while(true)
     {
         pwm0.percentual_duty_cicle =0;
         pwm0.frequencia= 100000;
@@ -111,18 +134,19 @@ void app_main() {
         atualiza_PWM(pwm0);
         vTaskDelay(2000 / portTICK_RATE_MS);
     }
-
+*/
     //durante a execução:
     //atualiza_PWM(pwm0);
 }
 
 /*-------------------------------------Implementação das Funções----------------------------------------------*/
 
+//Função executada no início da execução.. inicia os valores do pwm
 static void inicializa_variaveis(struct parametros_PWM  *pwm0,struct parametros_PWM  *pwm1)
 {
     pwm0->estado=0;                              //desligado
     pwm0->frequencia=1000;                       //1000 Hz
-    pwm0->percentual_duty_cicle=50;              //50%
+    pwm0->percentual_duty_cicle=0 ;              //0%
     pwm0->timer=0;                               //timer0
     pwm0->canal=0;                               //canal0
     pwm0->gpio=PWM0_Gpio;                        //gpio definido
@@ -132,7 +156,7 @@ static void inicializa_variaveis(struct parametros_PWM  *pwm0,struct parametros_
 
     pwm1->estado=0;                              //desligado
     pwm1->frequencia=1000;                       //1000 Hz
-    pwm1->percentual_duty_cicle=50;              //50%
+    pwm1->percentual_duty_cicle=0;               //0%
     pwm1->timer=1;                               //timer0
     pwm1->canal=1;                               //canal0
     pwm1->gpio=PWM1_Gpio;                        //gpio definido
@@ -142,7 +166,14 @@ static void inicializa_variaveis(struct parametros_PWM  *pwm0,struct parametros_
 }
 
 
-
+static void cria_delay(void *pvParameter)
+{
+    while(1)
+    {
+        vTaskDelay(100 / portTICK_RATE_MS);
+    }
+    
+}
 
 //Realiza as configurações iniciais do PWM baseado na documentação de Espressiv:
 //https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/ledc.html
@@ -329,4 +360,126 @@ void wifi_init_sta(){
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, instance_got_ip));
     ESP_ERROR_CHECK(esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, instance_any_id));
     vEventGroupDelete(s_wifi_event_group);
+}
+
+//Cria o Server, Faz as configurações Padrão e Inicia os URI Handlers
+//para os GETs
+static httpd_handle_t start_webserver(void)
+{
+    httpd_handle_t server = NULL;
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    config.lru_purge_enable = true;
+
+    // Inicia o server http
+    printf("Iniciando o Server na Porta: '%d'\n", config.server_port);
+    if (httpd_start(&server, &config) == ESP_OK) {
+        // Set URI handlers
+        printf("Registrando URI handlers\n");
+        httpd_register_uri_handler(server, &main_page);
+        return server;
+    }
+
+    printf("Erro ao iniciar Server\n");
+    return NULL;
+}
+
+//Imprime a Webpage
+static void print_webpage(httpd_req_t *req)
+{
+    char *buffer;
+    buffer = (char *) malloc(3400);
+    //Constantes Cstring para Armazenar os pedaços do código HTML 
+    const char *index_html_part1= "<!DOCTYPE html><html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"icon\" href=\"data:,\"><link rel=\"icon\" href=\"data:,\"></head><title>Projeto 10 - Gerador PWM controlado via Wireless</title><style>html{color: #ffffff;font-family: Verdana;text-align: center;background-color:#272727fd}.wrap {padding-top: 2.5%%;padding-right: 2.5%%;padding-left: 2.5%%;width: 95%%;overflow:auto;}.fleft {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float:left; width: 47.5%%;background: rgb(95, 95, 95);height:fit-content;padding-bottom: 3%%;}.fright {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float: right;width: 47.5%%;background:rgb(95, 95, 95);height:fit-content;padding-bottom: 3%%; } .fcenter {float: center;width: 5%%; background:#272727fd;height:fit-content; padding-bottom: 3%%;}.formulario{padding: 0px 0px;float: center;width: 95%%;text-align:center;}.campo_freq{width: 30%%;text-align: center;font-family:sans-serif;font-size: 14px;font-weight: bold;border-style: solid;border-radius: 1px;border-width: 3px;border-color: #000000;}.campo_duty{-webkit-appearance: none;width: 28%%;height: 5px;background: #ffffff;outline: none;opacity: 1;-webkit-transition: .2s;transition: opacity .2s;    }.campo_duty::-webkit-slider-thumb{-webkit-appearance: none;appearance: none;background: #04AA6D;}.btn_submit{text-align: center;background-color: #02500f;font-size: 20px;font-family: sans-serif;font-weight: bold;color: #ffffff;border-style: solid; border-radius: 1px;border-width: 3px;border-color: #ffffff;} </style>        <body><h2>Projeto 10 - Gerador PWM controlado via Wireless</h2><div class=\"wrap\"><div class=\"fleft\"><h3>PWM 0</h3><form class=\"formulario\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" value=";
+
+
+    char pwm0frequencia[10];
+    sprintf(pwm0frequencia, "\"%d\"", pwm0.frequencia);
+
+
+    const char *index_html_part2= "autocomplete=\"off\"><label>  Hz </label><br><br> <label>Duty Cicle:&#160; </label><input class=\"campo_duty\" type=\"range\" min=\"0\" max=\"100\" value=";
+    
+
+    char pwm0percentual[6];
+    sprintf(pwm0percentual, "\"%d\"", pwm0.percentual_duty_cicle);
+    
+
+    const char *index_html_part3="id=\"myRange\"><label> <span id=\"demo\"></span>%%</label><br><br><label>Output: </label><input name=\"estado\" class= \"campo_saida\" type=\"radio\" ";
+    
+
+    const char *pwmchecked="checked=\"checked\"";
+
+
+    const char *index_html_part4="><label>Ligado </label><input name=\"estado\" class= \"campo_saida\" type=\"radio\"";
+
+
+    const char *index_html_part5="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\"></form>  </div><div class=\"fright\"><h3>PWM 1</h3><form class=\"formulario\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" value=";
+    
+
+    char pwm1frequencia[10];
+    sprintf(pwm1frequencia, "\"%d\"", pwm1.frequencia);
+    
+
+    const char *index_html_part6="autocomplete=\"off\"><label>  Hz </label><br><br> <label>Duty Cicle:&#160; </label><input class=\"campo_duty\" type=\"range\" min=\"0\" max=\"100\" value=";
+    
+
+    char pwm1percentual[6];
+    sprintf(pwm1percentual, "\"%d\"", pwm1.percentual_duty_cicle);
+    
+
+    const char *index_html_part7="id=\"myRange2\"><label> <span id=\"demo2\"></span>%%</label><br><br><label>Output: </label>   <input name=\"estado\" class= \"campo_saida\" type=\"radio\"";
+    
+
+
+
+
+    const char *index_html_part8="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\"></form></div></div><script>var slider = document.getElementById(\"myRange\");var output = document.getElementById(\"demo\");output.innerHTML = slider.value;slider.oninput = function() {output.innerHTML = this.value;}; var slider2 = document.getElementById(\"myRange2\");var output2 = document.getElementById(\"demo2\");output2.innerHTML = slider2.value;slider2.oninput = function() {output2.innerHTML = this.value;}</script></body></html>";
+   
+
+
+    strcat(buffer, index_html_part1);
+    strcat(buffer, pwm0frequencia);
+    strcat(buffer, index_html_part2);
+    strcat(buffer, pwm0percentual);
+    strcat(buffer, index_html_part3);
+    if(pwm0.estado)
+    {
+        strcat(buffer, pwmchecked);
+    }
+    strcat(buffer, index_html_part4);
+    if(!pwm0.estado)
+    {
+        strcat(buffer, pwmchecked);
+    }
+    strcat(buffer, index_html_part5);
+    strcat(buffer, pwm1frequencia);
+    strcat(buffer, index_html_part6);
+    strcat(buffer, pwm1percentual);
+    strcat(buffer, index_html_part7);
+    if(pwm1.estado)
+    {
+        strcat(buffer, pwmchecked);
+    }
+    strcat(buffer, index_html_part4);
+    if(!pwm0.estado)
+    {
+        strcat(buffer, pwmchecked);
+    }
+    strcat(buffer, index_html_part8);
+
+
+    httpd_resp_send(req, buffer, strlen(buffer)); //envia via http o buffer que contém a página html completa
+
+    vTaskDelay(3000 / portTICK_RATE_MS);
+    free(buffer);
+
+}
+
+
+//handler do Get da Página Principal
+static esp_err_t main_page_get_handler(httpd_req_t *req)
+{
+    //imprime a página
+    print_webpage(req);
+    //retorna OK
+    return ESP_OK;
 }
