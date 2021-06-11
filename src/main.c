@@ -4,7 +4,7 @@
 #include "freertos/event_groups.h"  //grupo de eventos
 #include "nvs_flash.h"              //memória nvs
 #include "driver/ledc.h"            //PWM
-#include <math.h>
+#include <math.h>                   //Função log
 
 
 
@@ -35,14 +35,9 @@ tentar ao se conectar à rede Wireless*/
 
 /*-----------------------------------------------Constantes de Projeto --------------------------------------*/
 
-static const char *TAG = "ESP";             //A tag que será impressa no log do sistema 
+static const char *TAG = "LOG";             //A tag que será impressa no log do sistema 
 
 
-
-/*-----------------------------------------------------Variáveis GLobais-------------------------------------*/
-
-static uint32_t numero_tentativa_de_conexao_wifi = 0;   //numero atual da tentativa de se conectar a rede,
-                                                        //tentativas máximas= EXAMPLE_ESP_MAXIMUM_RETRY
 
 
 typedef struct parametros_PWM
@@ -50,12 +45,12 @@ typedef struct parametros_PWM
     bool                     estado; //ligado =1 , desligado=0
     uint32_t             frequencia; //frequencia do PWM   
     uint8_t   percentual_duty_cicle; //ciclo alto do PWM de 0 a 100%
-    int                       timer; //qual timer é associado a esse pwm
-    int                       canal; //qual canal é associado a esse pwm
-    int           resolucao_inicial;
-    int                  speed_mode;
-    int                        clock;
-    int                        gpio;
+    uint8_t                   timer; //qual timer é associado a esse pwm
+    uint8_t                   canal; //qual canal é associado a esse pwm
+    uint8_t       resolucao_inicial;
+    uint8_t              speed_mode;
+    uint8_t                   clock;
+    uint8_t                    gpio;
 }parametros_PWM;
 
 
@@ -123,20 +118,6 @@ void app_main() {
     server = start_webserver();   //configura e inicia o server
     xTaskCreate(&cria_delay, "cria_delay", 512,NULL,5,NULL );
 
-    /*while(true)
-    {
-        pwm0.percentual_duty_cicle =0;
-        pwm0.frequencia= 100000;
-        atualiza_PWM(pwm0);
-        vTaskDelay(2000 / portTICK_RATE_MS);
-        pwm0.percentual_duty_cicle =25;
-        pwm0.frequencia= 1000;
-        atualiza_PWM(pwm0);
-        vTaskDelay(2000 / portTICK_RATE_MS);
-    }
-*/
-    //durante a execução:
-    //atualiza_PWM(pwm0);
 }
 
 /*-------------------------------------Implementação das Funções----------------------------------------------*/
@@ -271,6 +252,9 @@ static void setup_nvs(){
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
+    static uint32_t numero_tentativa_de_conexao_wifi = 0;//numero atual da tentativa de se conectar a rede,
+                                                         //tentativas máximas= EXAMPLE_ESP_MAXIMUM_RETRY
+    
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect(); //se o Wifi ja foi iniciado tenta se conectar
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
@@ -366,8 +350,8 @@ void wifi_init_sta(){
 //para os GETs
 static httpd_handle_t start_webserver(void)
 {
-    httpd_handle_t server = NULL;
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    httpd_handle_t server   = NULL;
+    httpd_config_t config   = HTTPD_DEFAULT_CONFIG();
     config.lru_purge_enable = true;
 
     // Inicia o server http
