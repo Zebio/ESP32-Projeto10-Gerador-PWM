@@ -7,10 +7,15 @@
 #include <math.h>                   //Função log
 
 
+/*------------------------Mapeamento de Hardware----------------------*/
+//Vamos definir quais pinos do ESP serão usados como saída do PWM0 e PWM1
+#define pino_PWM0    18
+#define pino_PMW1    19
+
 
 
 /*------------------------Definições de Projeto-----------------------*/
-/* O event Group permite muitos eventos por grupo mas nos só nos importamos com 2 eventos:
+/* O event Group do wireless permite muitos eventos por grupo mas nos só nos importamos com 2 eventos:
  * - Conseguimos conexão com o AP com um IP
  * - Falhamos na conexão apos o número máximo de tentativas*/
 #define WIFI_CONNECTED_BIT BIT0
@@ -18,19 +23,10 @@
 
 
 /*Aqui definimos o SSID, a Senha e o número máximo de tentativas que vamos 
-tentar ao se conectar à rede Wireless*/
+tentar ao se conectar ao access point da rede wireless*/
 #define ESP_WIFI_SSID      "tira_o_zoio"
 #define ESP_WIFI_PASS      "jabuticaba"
 #define ESP_MAXIMUM_RETRY  10
-
-
-//Definições do PWM 0:
-#define PWM0_Gpio        18                     //PWM0->Timer0->Canal0->Gpio18
-
-//Definições do PWM 1:
-#define PWM1_Gpio        19                     //PWM1->Timer1->Canal1->Gpio19
-
-
 
 
 /*-----------------------------------------------Constantes de Projeto --------------------------------------*/
@@ -39,38 +35,18 @@ static const char *TAG = "LOG";             //A tag que será impressa no log do
 
 
 
-
-typedef struct parametros_PWM
-{
-    bool                     estado; //ligado =1 , desligado=0
-    uint32_t             frequencia; //frequencia do PWM   
-    uint8_t   percentual_duty_cicle; //ciclo alto do PWM de 0 a 100%
-    uint8_t                   timer; //qual timer é associado a esse pwm
-    uint8_t                   canal; //qual canal é associado a esse pwm
-    uint8_t       resolucao_inicial;
-    uint8_t              speed_mode;
-    uint8_t                   clock;
-    uint8_t                    gpio;
-}parametros_PWM;
-
-
 /*----------------------------------------------------Objetos------------------------------------------------*/
 
 //Handle dos Eventos Wireless
 static EventGroupHandle_t s_wifi_event_group;
 
-//Declaração do server http
+//Handle do server http
 static httpd_handle_t server =NULL;
-
-
-
 
 
 /*-----------------------------------------------Declaração das Funções--------------------------------------*/
 
-static void inicializa_variaveis(struct parametros_PWM *pwm0, struct parametros_PWM *pwm1);
-
-static void setup_PWM(struct parametros_PWM  pwm);     //Realiza as configurações iniciais do PWM.
+static void setup_PWM();     //Realiza as configurações iniciais do PWM.
 
 static void setup_nvs();     //Inicia a memória nvs. Ela é necessária para se conectar à rede Wireless
 
@@ -82,7 +58,7 @@ void wifi_init_sta(); //Configura a rede wireless
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data);
 
-static void atualiza_PWM(struct parametros_PWM pwm); //Atualiza os valores de resolução do duty, frequencia e duty cicle
+//static void atualiza_PWM(struct parametros_PWM pwm); //Atualiza os valores de resolução do duty, frequencia e duty cicle
 
 static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq);
 
@@ -107,138 +83,69 @@ static const httpd_uri_t main_page = {
     .user_ctx  = NULL
 };
 
-
-    struct parametros_PWM  pwm0,pwm1;   //cria a struct com os parametros do pwm
 void app_main() {
-    inicializa_variaveis(&pwm0,&pwm1);  //inicializa variaveis como frequencia, duty cicle.. etc
-    setup_PWM(pwm0);                    //configura os canais e timers do PWM0
-    setup_PWM(pwm1);                    //configura os canais e timers do PWM1
+    setup_PWM();                    //configura os canais e timers do PWM0
     setup_nvs();                        //inicia a memória nvs necessária para uso do wireless
     wifi_init_sta();                    //inicia o wireless e se conecta à rede
     server = start_webserver();   //configura e inicia o server
+  //atualiza_PWM(pwm0);
+  //atualiza_PWM(pwm1);
     xTaskCreate(&cria_delay, "cria_delay", 512,NULL,5,NULL );
 
 }
 
 /*-------------------------------------Implementação das Funções----------------------------------------------*/
 
-//Função executada no início da execução.. inicia os valores do pwm
-static void inicializa_variaveis(struct parametros_PWM  *pwm0,struct parametros_PWM  *pwm1)
-{
-    pwm0->estado=0;                              //desligado
-    pwm0->frequencia=1000;                       //1000 Hz
-    pwm0->percentual_duty_cicle=0 ;              //0%
-    pwm0->timer=0;                               //timer0
-    pwm0->canal=0;                               //canal0
-    pwm0->gpio=PWM0_Gpio;                        //gpio definido
-    pwm0->resolucao_inicial=LEDC_TIMER_13_BIT;   //13 bits de resolução inicial;
-    pwm0->speed_mode       =LEDC_HIGH_SPEED_MODE;//Modo High speed;
-    pwm0->clock            =LEDC_USE_APB_CLK;    //A fonte de clock do timer. APB_CLK = 80MHz;
-
-    pwm1->estado=0;                              //desligado
-    pwm1->frequencia=1000;                       //1000 Hz
-    pwm1->percentual_duty_cicle=0;               //0%
-    pwm1->timer=1;                               //timer0
-    pwm1->canal=1;                               //canal0
-    pwm1->gpio=PWM1_Gpio;                        //gpio definido
-    pwm1->resolucao_inicial=LEDC_TIMER_13_BIT;   //13 bits de resolução inicial;
-    pwm1->speed_mode       =LEDC_HIGH_SPEED_MODE;//Modo High speed;
-    pwm1->clock            =LEDC_USE_APB_CLK;    //A fonte de clock do timer. APB_CLK = 80MHz;
-}
-
-
-static void cria_delay(void *pvParameter)
-{
-    while(1)
-    {
-        vTaskDelay(100 / portTICK_RATE_MS);
-    }
-    
-}
 
 //Realiza as configurações iniciais do PWM baseado na documentação de Espressiv:
 //https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/ledc.html
-static void setup_PWM(struct parametros_PWM  pwm){
+static void setup_PWM()
+{
 
-    ledc_timer_config_t pwm_config = { //Configurações do PWM
-        .duty_resolution =   pwm.resolucao_inicial, // resolution of PWM duty
-        .freq_hz =           pwm.frequencia,        // frequency of PWM signal
-        .speed_mode =        pwm.speed_mode,        // timer mode
-        .timer_num =         pwm.timer,             // timer index
-        .clk_cfg =           pwm.clock,             // clock source
+    //************************Struct e Configuração do Timer0******************************
+    ledc_timer_config_t pwm_timer_config = { //Configurações do PWM0
+        .duty_resolution =   LEDC_TIMER_4_BIT,       // resolução do duty do PWM
+        .freq_hz =           5000,                   // frequencia do sinal PWM
+        .speed_mode =        LEDC_HIGH_SPEED_MODE,   // modo do timer
+        .timer_num =         LEDC_TIMER_0,           // identificador do timer
+        .clk_cfg =           LEDC_USE_APB_CLK,       // fonte de clock
     };
-    // Aplicar a configuração do PWM0
-    ledc_timer_config(&pwm_config);
+    // Aplicar os parâmetros da struct no timer
+    ESP_ERROR_CHECK(ledc_timer_config(&pwm_timer_config));
 
-    //Configurações do canal do PWM
-    ledc_channel_config_t pwm_ch_config = {
-        .gpio_num   = pwm.gpio,            //Gpio de saída do sinal PWM
-        .speed_mode = pwm.speed_mode,      //modo do PWM
-        .channel    = pwm.canal,           //Canal do PWM
-        .intr_type  = 0,                   //interrupções desabilitadas
-        .timer_sel  = pwm.timer,           //qual timer está asociado a esse canal
-        .duty       = 0,                   //duty cicle inicial
+    //************************Struct e Configuração do channel0******************************
+    ledc_channel_config_t pwm_channel_config = {
+        .gpio_num   = pino_PWM0,                  //Gpio de saída do sinal PWM
+        .speed_mode = LEDC_HIGH_SPEED_MODE,       //modo do PWM
+        .channel    = LEDC_CHANNEL_0,             //Canal do PWM
+        .intr_type  = LEDC_INTR_DISABLE,          //interrupções
+        .timer_sel  = LEDC_TIMER_0,               //qual timer está asociado a esse canal
+        .duty       = 1,                          //duty cicle inicial
         .hpoint     = 0,         
     };
+    // Aplicar os parâmetros da struct no canal
+    ESP_ERROR_CHECK(ledc_channel_config(&pwm_channel_config));
 
-    // Aplicar a configuração do Canal do PWM0
-    ledc_channel_config(&pwm_ch_config);
+    //************************Struct e Configuração do Timer1****************************************
+    pwm_timer_config.timer_num=LEDC_TIMER_0;
+    // Aplicar os parâmetros da struct no timer 1
+    ESP_ERROR_CHECK(ledc_timer_config(&pwm_timer_config));
+
+    //************************Struct e Configuração do channel1****************************************
+    pwm_channel_config.gpio_num  = pino_PMW1;
+    pwm_channel_config.channel   = LEDC_CHANNEL_1;
+    pwm_channel_config.timer_sel = LEDC_TIMER_1;
+    pwm_channel_config.duty      = 15;
+
+    // Aplicar os parâmetros da struct no canal 1
+    ESP_ERROR_CHECK(ledc_channel_config(&pwm_channel_config));
 }
 
-//retorna o log na base 2 do valor recebido
-static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq)
 
 
-    //PWM duty Resolution(bits)= |log2 (   PWMFreq      )|
-    //                           |      --------------   |
-    //                           |      timer_clk_freq   |
+/*----Inicializa a memória nvs pois é necessária para o funcionamento do Wireless---------*/
+static void setup_nvs()
 {
-    long double frac = pwm_freq/timer_clk_freq;
-    long double retorno= (logl(frac)/logl(2));
-    return abs((int)retorno);
-}
-
-//Atualiza o sinal PWM baseado no canal selecionado, na frequência pedida e na porcentagem do duty
-static void atualiza_PWM(struct parametros_PWM pwm){
-
-
-    int timer_clk_freq;                 // 80 MHz é a velocidade do clock APB. Na função 
-                                        // "inicializa variaveis", se quiser usar outro clock, usando
-                                        // um valor diferente de LEDC_USE_APB_CLK terá que adaptar
-                                        // a variavel "timer_clk_freq" com a frequência do clock
-                                        // selecionado que achar no datasheet
-    if(pwm.clock==LEDC_USE_APB_CLK)
-    {
-        timer_clk_freq=80000000;
-    }
-
-    int resolucao_duty= calc_resolucao_duty(pwm.frequencia,timer_clk_freq);
-
-    ESP_LOGI(TAG,"Atualizar PWM: Freq: %d, Duty: %d, Resolução: %d",
-            pwm.frequencia,
-            pwm.percentual_duty_cicle,
-            resolucao_duty);
-
-    //aplica a Resolução do Duty(bits) no timer correto  
-    ledc_timer_set(pwm.speed_mode,pwm.timer,1,resolucao_duty,pwm.clock);
-
-    //Atualiza Frequência no timer correto
-    ledc_set_freq(pwm.speed_mode,pwm.timer,pwm.frequencia);
-
-    //transforma o valor do duty de percentual para bits
-    uint32_t duty = pow(2,resolucao_duty)*((double)pwm.percentual_duty_cicle/100);
-  
-    // Atualiza o duty cicle do canal
-    ledc_set_duty(pwm.speed_mode,pwm.canal,duty);
-
-    // Aplica as configurações
-    ledc_update_duty(pwm.speed_mode,pwm.canal);
-}
-
-
-
-//Inicializa a memória nvs pois é necessária para o funcionamento do Wireless
-static void setup_nvs(){
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -248,7 +155,9 @@ static void setup_nvs(){
 }
 
 
-//Lida com os Eventos da rede Wireless, conexão à rede e endereço IP
+
+/*----------------Lida com os Eventos da rede Wireless, conexão à rede e endereço IP-----------------------*/
+//essa função é executada em segundo plano
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -274,12 +183,15 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
-void wifi_init_sta(){
+/*---------------------------Inicializa a Conexão Wireless-------------------------*/
+void wifi_init_sta()
+{
     s_wifi_event_group = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());
 
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+    
     esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -346,8 +258,10 @@ void wifi_init_sta(){
     vEventGroupDelete(s_wifi_event_group);
 }
 
-//Cria o Server, Faz as configurações Padrão e Inicia os URI Handlers
-//para os GETs
+
+
+
+/*--------------Cria o Server, Faz as configurações Padrão e Inicia os URI Handlers--------------*/
 static httpd_handle_t start_webserver(void)
 {
     httpd_handle_t server   = NULL;
@@ -367,70 +281,53 @@ static httpd_handle_t start_webserver(void)
     return NULL;
 }
 
-//Imprime a Webpage
+/*---Essa função concatena a página web como um vetor char e a envia como resposta da requisição req---*/
 static void print_webpage(httpd_req_t *req)
 {
     char *buffer;
     buffer = (char *) malloc(3500);
-    //Constantes Cstring para Armazenar os pedaços do código HTML 
+    
     const char *index_html_part1= "<!DOCTYPE html><html><head><meta content=\"text/html;charset=utf-8\" http-equiv=\"Content-Type\"> <meta content=\"utf-8\" http-equiv=\"encoding\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"icon\" href=\"data:,\"> <title>Projeto 10 - Gerador PWM controlado via Wireless</title><style>html{color: #ffffff;font-family: Verdana;text-align: center;background-color:#272727fd}.wrap {padding-top: 2.5%;padding-right: 2.5%;padding-left: 2.5%;width: 95%;overflow:auto;}.fleft {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float:left; width: 47.5%;background: rgb(95, 95, 95);height:fit-content;padding-bottom: 3%;}.fright {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float: right;width: 47.5%;background:rgb(95, 95, 95);height:fit-content;padding-bottom: 3%; } .fcenter {float: center;width: 5%; background:#272727fd;height:fit-content; padding-bottom: 3%;}.formulario{padding: 0px 0px;float: center;width: 95%;text-align:center;}.campo_freq{width: 30%;text-align: center;font-family:sans-serif;font-size: 14px;font-weight: bold;border-style: solid;border-radius: 1px;border-width: 3px;border-color: #000000;}.campo_duty{-webkit-appearance: none;width: 28%;height: 5px;background: #ffffff;outline: none;opacity: 1;-webkit-transition: .2s;transition: opacity .2s;    }.campo_duty::-webkit-slider-thumb{-webkit-appearance: none;appearance: none;background: #04AA6D;}.btn_submit{text-align: center;background-color: #02500f;font-size: 20px;font-family: sans-serif;font-weight: bold;color: #ffffff;border-style: solid; border-radius: 1px;border-width: 3px;border-color: #ffffff;} </style> </head> <body><h2>Projeto 10 - Gerador PWM controlado via Wireless</h2><div class=\"wrap\"><div class=\"fleft\"><h3>PWM 0</h3><form class=\"formulario\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" value=";
 
-
     char pwm0frequencia[10];
-    sprintf(pwm0frequencia, "\"%d\"", pwm0.frequencia);
-
+   // sprintf(pwm0frequencia, "\"%d\"", pwm0.frequencia);
 
     const char *index_html_part2= "autocomplete=\"off\"><label>  Hz </label><br><br> <label>Duty Cicle:&#160; </label><input class=\"campo_duty\" type=\"range\" min=\"0\" max=\"100\" value=";
-    
 
     char pwm0percentual[6];
-    sprintf(pwm0percentual, "\"%d\"", pwm0.percentual_duty_cicle);
+  //  sprintf(pwm0percentual, "\"%d\"", pwm0.percentual_duty_cicle);
     
-
     const char *index_html_part3="id=\"myRange\"><label> <span id=\"demo\"></span>%</label><br><br><label>Output: </label><input name=\"estado\" class= \"campo_saida\" type=\"radio\" ";
     
-
     const char *pwmchecked="checked=\"checked\"";
-
 
     const char *index_html_part4="><label>Ligado </label><input name=\"estado\" class= \"campo_saida\" type=\"radio\"";
 
-
     const char *index_html_part5="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\"></form>  </div><div class=\"fright\"><h3>PWM 1</h3><form class=\"formulario\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" value=";
     
-
     char pwm1frequencia[10];
-    sprintf(pwm1frequencia, "\"%d\"", pwm1.frequencia);
+   // sprintf(pwm1frequencia, "\"%d\"", pwm1.frequencia);
     
-
     const char *index_html_part6="autocomplete=\"off\"><label>  Hz </label><br><br> <label>Duty Cicle:&#160; </label><input class=\"campo_duty\" type=\"range\" min=\"0\" max=\"100\" value=";
     
-
     char pwm1percentual[6];
-    sprintf(pwm1percentual, "\"%d\"", pwm1.percentual_duty_cicle);
+   // sprintf(pwm1percentual, "\"%d\"", pwm1.percentual_duty_cicle);
     
-
     const char *index_html_part7="id=\"myRange2\"><label> <span id=\"demo2\"></span>%</label><br><br><label>Output: </label>   <input name=\"estado\" class= \"campo_saida\" type=\"radio\"";
     
-
-
-
-
     const char *index_html_part8="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\"></form></div></div><script>var slider = document.getElementById(\"myRange\");var output = document.getElementById(\"demo\");output.innerHTML = slider.value;slider.oninput = function() {output.innerHTML = this.value;}; var slider2 = document.getElementById(\"myRange2\");var output2 = document.getElementById(\"demo2\");output2.innerHTML = slider2.value;slider2.oninput = function() {output2.innerHTML = this.value;}</script></body></html>";
    
-
-
     strcpy(buffer, index_html_part1);
     strcat(buffer, pwm0frequencia);
     strcat(buffer, index_html_part2);
     strcat(buffer, pwm0percentual);
     strcat(buffer, index_html_part3);
-    if(pwm0.estado)
+   // if(pwm0.estado)
     {
         strcat(buffer, pwmchecked);
     }
     strcat(buffer, index_html_part4);
-    if(!pwm0.estado)
+  //  if(!pwm0.estado)
     {
         strcat(buffer, pwmchecked);
     }
@@ -439,12 +336,12 @@ static void print_webpage(httpd_req_t *req)
     strcat(buffer, index_html_part6);
     strcat(buffer, pwm1percentual);
     strcat(buffer, index_html_part7);
-    if(pwm1.estado)
+   // if(pwm1.estado)
     {
         strcat(buffer, pwmchecked);
     }
     strcat(buffer, index_html_part4);
-    if(!pwm0.estado)
+   // if(!pwm0.estado)
     {
         strcat(buffer, pwmchecked);
     }
@@ -459,11 +356,76 @@ static void print_webpage(httpd_req_t *req)
 }
 
 
-//handler do Get da Página Principal
+/*--------------handler do Get da Página Principal html-------------------*/
 static esp_err_t main_page_get_handler(httpd_req_t *req)
 {
     //imprime a página
     print_webpage(req);
     //retorna OK
     return ESP_OK;
+}
+
+
+//retorna o log na base 2 do valor recebido
+static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq)
+
+
+    //PWM duty Resolution(bits)= |log2 (   PWMFreq      )|
+    //                           |      --------------   |
+    //                           |      timer_clk_freq   |
+{
+    long double frac = pwm_freq/timer_clk_freq;
+    long double retorno= (logl(frac)/logl(2));
+    return (uint32_t)abs((int)retorno);
+}
+
+/*
+//Atualiza o sinal PWM baseado no canal selecionado, na frequência pedida e na porcentagem do duty
+static void atualiza_PWM(struct parametros_PWM pwm){
+
+
+    int timer_clk_freq;                 // 80 MHz é a velocidade do clock APB. Na função 
+                                        // "inicializa variaveis", se quiser usar outro clock, usando
+                                        // um valor diferente de LEDC_USE_APB_CLK terá que adaptar
+                                        // a variavel "timer_clk_freq" com a frequência do clock
+                                        // selecionado que achar no datasheet
+    
+    timer_clk_freq=80000000;
+
+    uint32_t resolucao_duty= calc_resolucao_duty(pwm.frequencia,timer_clk_freq);
+
+    ESP_LOGI(TAG,"Atualizar PWM: Freq: %d, Duty: %d, Resolução: %d",
+            pwm.frequencia,
+            pwm.percentual_duty_cicle,
+            resolucao_duty);
+
+    //aplica a Resolução do Duty(bits) no timer correto  
+    ESP_ERROR_CHECK(ledc_timer_set(pwm.speed_mode,pwm.timer,1,resolucao_duty,pwm.clock));
+
+    //Atualiza Frequência no timer correto
+    ESP_ERROR_CHECK(ledc_set_freq(pwm.speed_mode,pwm.timer,pwm.frequencia));
+
+    //transforma o valor do duty de percentual para bits
+    double duty_double = (pow(2.0,(double)resolucao_duty)*((double)pwm.percentual_duty_cicle/100.0));
+    uint32_t duty = (uint32_t)duty_double;
+
+    ESP_LOGE(TAG, "Duty: %zu",duty);
+    // Atualiza o duty cicle do canal
+    ESP_ERROR_CHECK(ledc_set_duty(pwm.speed_mode,pwm.canal,duty));
+
+    // Aplica as configurações
+    ESP_ERROR_CHECK(ledc_update_duty(pwm.speed_mode,pwm.canal));
+
+    ESP_LOGE(TAG, " duty retornado: %d",ledc_get_duty(pwm.speed_mode,pwm.canal));
+}
+
+*/
+
+static void cria_delay(void *pvParameter)
+{
+    while(1)
+    {
+        vTaskDelay(100 / portTICK_RATE_MS);
+    }
+    
 }
