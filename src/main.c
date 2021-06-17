@@ -71,6 +71,8 @@ static void print_webpage(httpd_req_t *req);
 //handler do Get da Página Principal
 static esp_err_t main_page_get_handler(httpd_req_t *req);
 
+static void atualiza_PWM(int pwm_index,uint32_t frequencia, uint32_t percentual_duty);
+
 static void cria_delay(void *pvParameter);
 
 
@@ -85,11 +87,11 @@ static const httpd_uri_t main_page = {
 
 void app_main() {
     setup_PWM();                    //configura os canais e timers do PWM0
-    setup_nvs();                        //inicia a memória nvs necessária para uso do wireless
-    wifi_init_sta();                    //inicia o wireless e se conecta à rede
-    server = start_webserver();   //configura e inicia o server
-  //atualiza_PWM(pwm0);
-  //atualiza_PWM(pwm1);
+    setup_nvs();                    //inicia a memória nvs necessária para uso do wireless
+    wifi_init_sta();                //inicia o wireless e se conecta à rede
+    server = start_webserver();     //configura e inicia o server
+   // atualiza_PWM(0,5, 30);
+   // atualiza_PWM(1,10, 70);
     xTaskCreate(&cria_delay, "cria_delay", 512,NULL,5,NULL );
 
 }
@@ -105,12 +107,17 @@ static void setup_PWM()
     //************************Struct e Configuração do Timer0******************************
     ledc_timer_config_t pwm_timer_config = { //Configurações do PWM0
         .duty_resolution =   LEDC_TIMER_4_BIT,       // resolução do duty do PWM
-        .freq_hz =           5000,                   // frequencia do sinal PWM
-        .speed_mode =        LEDC_HIGH_SPEED_MODE,   // modo do timer
+        .freq_hz =           16,                   // frequencia do sinal PWM
+        .speed_mode =        LEDC_LOW_SPEED_MODE,   // modo do timer
         .timer_num =         LEDC_TIMER_0,           // identificador do timer
         .clk_cfg =           LEDC_USE_APB_CLK,       // fonte de clock
     };
     // Aplicar os parâmetros da struct no timer
+    ESP_ERROR_CHECK(ledc_timer_config(&pwm_timer_config));
+
+    //************************Struct e Configuração do Timer1****************************************
+    pwm_timer_config.timer_num = LEDC_TIMER_1;
+    // Aplicar os parâmetros da struct no timer 1
     ESP_ERROR_CHECK(ledc_timer_config(&pwm_timer_config));
 
     //************************Struct e Configuração do channel0******************************
@@ -120,22 +127,19 @@ static void setup_PWM()
         .channel    = LEDC_CHANNEL_0,             //Canal do PWM
         .intr_type  = LEDC_INTR_DISABLE,          //interrupções
         .timer_sel  = LEDC_TIMER_0,               //qual timer está asociado a esse canal
-        .duty       = 1,                          //duty cicle inicial
+        .duty       = 10,                          //duty cicle inicial
         .hpoint     = 0,         
     };
     // Aplicar os parâmetros da struct no canal
     ESP_ERROR_CHECK(ledc_channel_config(&pwm_channel_config));
 
-    //************************Struct e Configuração do Timer1****************************************
-    pwm_timer_config.timer_num=LEDC_TIMER_0;
-    // Aplicar os parâmetros da struct no timer 1
-    ESP_ERROR_CHECK(ledc_timer_config(&pwm_timer_config));
+
 
     //************************Struct e Configuração do channel1****************************************
     pwm_channel_config.gpio_num  = pino_PMW1;
     pwm_channel_config.channel   = LEDC_CHANNEL_1;
     pwm_channel_config.timer_sel = LEDC_TIMER_1;
-    pwm_channel_config.duty      = 15;
+    pwm_channel_config.duty      = 2;
 
     // Aplicar os parâmetros da struct no canal 1
     ESP_ERROR_CHECK(ledc_channel_config(&pwm_channel_config));
@@ -379,9 +383,9 @@ static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq)
     return (uint32_t)abs((int)retorno);
 }
 
-/*
+
 //Atualiza o sinal PWM baseado no canal selecionado, na frequência pedida e na porcentagem do duty
-static void atualiza_PWM(struct parametros_PWM pwm){
+static void atualiza_PWM(int pwm_index,uint32_t frequencia, uint32_t percentual_duty){
 
 
     int timer_clk_freq;                 // 80 MHz é a velocidade do clock APB. Na função 
@@ -392,34 +396,34 @@ static void atualiza_PWM(struct parametros_PWM pwm){
     
     timer_clk_freq=80000000;
 
-    uint32_t resolucao_duty= calc_resolucao_duty(pwm.frequencia,timer_clk_freq);
+    uint32_t resolucao_duty= calc_resolucao_duty(frequencia,timer_clk_freq);
 
     ESP_LOGI(TAG,"Atualizar PWM: Freq: %d, Duty: %d, Resolução: %d",
-            pwm.frequencia,
-            pwm.percentual_duty_cicle,
+            frequencia,
+            percentual_duty,
             resolucao_duty);
 
     //aplica a Resolução do Duty(bits) no timer correto  
-    ESP_ERROR_CHECK(ledc_timer_set(pwm.speed_mode,pwm.timer,1,resolucao_duty,pwm.clock));
+    ESP_ERROR_CHECK(ledc_timer_set(LEDC_HIGH_SPEED_MODE,pwm_index,1,resolucao_duty,LEDC_USE_APB_CLK));
 
     //Atualiza Frequência no timer correto
-    ESP_ERROR_CHECK(ledc_set_freq(pwm.speed_mode,pwm.timer,pwm.frequencia));
+    ESP_ERROR_CHECK(ledc_set_freq(LEDC_HIGH_SPEED_MODE,pwm_index,frequencia));
 
     //transforma o valor do duty de percentual para bits
-    double duty_double = (pow(2.0,(double)resolucao_duty)*((double)pwm.percentual_duty_cicle/100.0));
+    double duty_double = (pow(2.0,(double)resolucao_duty)*((double)percentual_duty/100.0));
     uint32_t duty = (uint32_t)duty_double;
 
     ESP_LOGE(TAG, "Duty: %zu",duty);
     // Atualiza o duty cicle do canal
-    ESP_ERROR_CHECK(ledc_set_duty(pwm.speed_mode,pwm.canal,duty));
+    ESP_ERROR_CHECK(ledc_set_duty(LEDC_HIGH_SPEED_MODE,pwm_index,duty));
 
     // Aplica as configurações
-    ESP_ERROR_CHECK(ledc_update_duty(pwm.speed_mode,pwm.canal));
+    ESP_ERROR_CHECK(ledc_update_duty(LEDC_HIGH_SPEED_MODE,pwm_index));
 
-    ESP_LOGE(TAG, " duty retornado: %d",ledc_get_duty(pwm.speed_mode,pwm.canal));
+    ESP_LOGE(TAG, " duty retornado: %d",ledc_get_duty(LEDC_HIGH_SPEED_MODE,pwm_index));
 }
 
-*/
+
 
 static void cria_delay(void *pvParameter)
 {
