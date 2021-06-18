@@ -5,6 +5,9 @@
 #include "nvs_flash.h"              //memória nvs
 #include "driver/ledc.h"            //PWM
 #include <math.h>                   //Função log
+#include <sys/param.h>              //Função MIN
+
+
 
 
 /*------------------------Mapeamento de Hardware----------------------*/
@@ -71,6 +74,12 @@ static void print_webpage(httpd_req_t *req);
 //handler do Get da Página Principal
 static esp_err_t main_page_get_handler(httpd_req_t *req);
 
+//handler do formulário html do pwm0
+static esp_err_t pwm0_post_handler(httpd_req_t *req);
+
+//handler do formulário html do pwm1
+static esp_err_t pwm1_post_handler(httpd_req_t *req);
+
 static void atualiza_PWM(int pwm_index,uint32_t frequencia, uint32_t percentual_duty);
 
 static void cria_delay(void *pvParameter);
@@ -83,6 +92,22 @@ static const httpd_uri_t main_page = {
     .method    = HTTP_GET,
     .handler   = main_page_get_handler,
     .user_ctx  = NULL
+};
+
+// URI handler do formulário do pwm0 
+static const httpd_uri_t post_pwm0 = {
+    .uri      = "/pwm0",
+    .method   = HTTP_POST,
+    .handler  = pwm0_post_handler,
+    .user_ctx = NULL
+};
+
+// URI handler do formulário do pwm1
+static const httpd_uri_t post_pwm1 = {
+    .uri      = "/pwm1",
+    .method   = HTTP_POST,
+    .handler  = pwm1_post_handler,
+    .user_ctx = NULL
 };
 
 void app_main() {
@@ -278,6 +303,8 @@ static httpd_handle_t start_webserver(void)
         // Set URI handlers
         printf("Registrando URI handlers\n");
         httpd_register_uri_handler(server, &main_page);
+        httpd_register_uri_handler(server, &post_pwm0);
+        httpd_register_uri_handler(server, &post_pwm1);
         return server;
     }
 
@@ -291,7 +318,7 @@ static void print_webpage(httpd_req_t *req)
     char *buffer;
     buffer = (char *) malloc(3500);
     
-    const char *index_html_part1= "<!DOCTYPE html><html><head><meta content=\"text/html;charset=utf-8\" http-equiv=\"Content-Type\"> <meta content=\"utf-8\" http-equiv=\"encoding\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"icon\" href=\"data:,\"> <title>Projeto 10 - Gerador PWM controlado via Wireless</title><style>html{color: #ffffff;font-family: Verdana;text-align: center;background-color:#272727fd}.wrap {padding-top: 2.5%;padding-right: 2.5%;padding-left: 2.5%;width: 95%;overflow:auto;}.fleft {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float:left; width: 47.5%;background: rgb(95, 95, 95);height:fit-content;padding-bottom: 3%;}.fright {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float: right;width: 47.5%;background:rgb(95, 95, 95);height:fit-content;padding-bottom: 3%; } .fcenter {float: center;width: 5%; background:#272727fd;height:fit-content; padding-bottom: 3%;}.formulario{padding: 0px 0px;float: center;width: 95%;text-align:center;}.campo_freq{width: 30%;text-align: center;font-family:sans-serif;font-size: 14px;font-weight: bold;border-style: solid;border-radius: 1px;border-width: 3px;border-color: #000000;}.campo_duty{-webkit-appearance: none;width: 28%;height: 5px;background: #ffffff;outline: none;opacity: 1;-webkit-transition: .2s;transition: opacity .2s;    }.campo_duty::-webkit-slider-thumb{-webkit-appearance: none;appearance: none;background: #04AA6D;}.btn_submit{text-align: center;background-color: #02500f;font-size: 20px;font-family: sans-serif;font-weight: bold;color: #ffffff;border-style: solid; border-radius: 1px;border-width: 3px;border-color: #ffffff;} </style> </head> <body><h2>Projeto 10 - Gerador PWM controlado via Wireless</h2><div class=\"wrap\"><div class=\"fleft\"><h3>PWM 0</h3><form class=\"formulario\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" value=";
+    const char *index_html_part1= "<!DOCTYPE html><html><head><meta content=\"text/html;charset=utf-8\" http-equiv=\"Content-Type\"> <meta content=\"utf-8\" http-equiv=\"encoding\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"icon\" href=\"data:,\"> <title>Projeto 10 - Gerador PWM controlado via Wireless</title><style>html{color: #ffffff;font-family: Verdana;text-align: center;background-color:#272727fd}.wrap {padding-top: 2.5%;padding-right: 2.5%;padding-left: 2.5%;width: 95%;overflow:auto;}.fleft {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float:left; width: 47.5%;background: rgb(95, 95, 95);height:fit-content;padding-bottom: 3%;}.fright {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float: right;width: 47.5%;background:rgb(95, 95, 95);height:fit-content;padding-bottom: 3%; } .fcenter {float: center;width: 5%; background:#272727fd;height:fit-content; padding-bottom: 3%;}.formulario{padding: 0px 0px;float: center;width: 95%;text-align:center;}.campo_freq{width: 30%;text-align: center;font-family:sans-serif;font-size: 14px;font-weight: bold;border-style: solid;border-radius: 1px;border-width: 3px;border-color: #000000;}.campo_duty{-webkit-appearance: none;width: 28%;height: 5px;background: #ffffff;outline: none;opacity: 1;-webkit-transition: .2s;transition: opacity .2s;    }.campo_duty::-webkit-slider-thumb{-webkit-appearance: none;appearance: none;background: #04AA6D;}.btn_submit{text-align: center;background-color: #02500f;font-size: 20px;font-family: sans-serif;font-weight: bold;color: #ffffff;border-style: solid; border-radius: 1px;border-width: 3px;border-color: #ffffff;} </style> </head> <body><h2>Projeto 10 - Gerador PWM controlado via Wireless</h2><div class=\"wrap\"><div class=\"fleft\"><h3>PWM 0</h3><form class=\"formulario\" method=\"post\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" value=";
 
     char pwm0frequencia[10];
    // sprintf(pwm0frequencia, "\"%d\"", pwm0.frequencia);
@@ -307,7 +334,7 @@ static void print_webpage(httpd_req_t *req)
 
     const char *index_html_part4="><label>Ligado </label><input name=\"estado\" class= \"campo_saida\" type=\"radio\"";
 
-    const char *index_html_part5="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\"></form>  </div><div class=\"fright\"><h3>PWM 1</h3><form class=\"formulario\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" value=";
+    const char *index_html_part5="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\" name=\"pwm0\"></form>  </div><div class=\"fright\"><h3>PWM 1</h3><form class=\"formulario\" method=\"post\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" value=";
     
     char pwm1frequencia[10];
    // sprintf(pwm1frequencia, "\"%d\"", pwm1.frequencia);
@@ -319,7 +346,7 @@ static void print_webpage(httpd_req_t *req)
     
     const char *index_html_part7="id=\"myRange2\"><label> <span id=\"demo2\"></span>%</label><br><br><label>Output: </label>   <input name=\"estado\" class= \"campo_saida\" type=\"radio\"";
     
-    const char *index_html_part8="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\"></form></div></div><script>var slider = document.getElementById(\"myRange\");var output = document.getElementById(\"demo\");output.innerHTML = slider.value;slider.oninput = function() {output.innerHTML = this.value;}; var slider2 = document.getElementById(\"myRange2\");var output2 = document.getElementById(\"demo2\");output2.innerHTML = slider2.value;slider2.oninput = function() {output2.innerHTML = this.value;}</script></body></html>";
+    const char *index_html_part8="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\" name=\"pwm1\"></form></div></div><script>var slider = document.getElementById(\"myRange\");var output = document.getElementById(\"demo\");output.innerHTML = slider.value;slider.oninput = function() {output.innerHTML = this.value;}; var slider2 = document.getElementById(\"myRange2\");var output2 = document.getElementById(\"demo2\");output2.innerHTML = slider2.value;slider2.oninput = function() {output2.innerHTML = this.value;}</script></body></html>";
    
     strcpy(buffer, index_html_part1);
     strcat(buffer, pwm0frequencia);
@@ -366,6 +393,55 @@ static esp_err_t main_page_get_handler(httpd_req_t *req)
     //imprime a página
     print_webpage(req);
     //retorna OK
+    return ESP_OK;
+}
+
+static esp_err_t pwm0_post_handler(httpd_req_t *req)
+{
+
+    char buf[100];
+    int ret, remaining = req->content_len;
+
+    while (remaining > 0) {
+        /* Read the data for the request */
+        if ((ret = httpd_req_recv(req, buf,
+                        MIN(remaining, sizeof(buf)))) <= 0) {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                /* Retry receiving if timeout occurred */
+                continue;
+            }
+            return ESP_FAIL;
+        }
+    }
+    ESP_LOGI(TAG,"post pwm0");
+    print_webpage(req);
+    
+    
+    return ESP_OK;
+}
+
+static esp_err_t pwm1_post_handler(httpd_req_t *req)
+{
+    
+    char buf[100];
+    int ret, remaining = req->content_len;
+
+    while (remaining > 0) 
+    {
+        /* Read the data for the request */
+        if ((ret = httpd_req_recv(req, buf,
+                        MIN(remaining, sizeof(buf)))) <= 0) 
+        {
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) 
+            {
+                /* Retry receiving if timeout occurred */
+                continue;
+            }
+            return ESP_FAIL;
+        }
+    }
+    ESP_LOGI(TAG,"post pwm1");
+    print_webpage(req);
     return ESP_OK;
 }
 
