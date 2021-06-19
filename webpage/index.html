@@ -10,7 +10,7 @@
                 <h3>PWM 0</h3>
                 <form class="formulario" method="post">
                     <label>Frequência: </label>
-                    <input class="campo_freq" type="text" value="1250" autocomplete="off">
+                    <input class="campo_freq" type="text" id="freq" name="freq" value="1250" autocomplete="off">
                     <label>  Hz </label><br><br> 
 
                     <label>Duty Cicle:&#160; </label>
@@ -18,8 +18,8 @@
                     <label> <span id="demo"></span>%</label><br><br>
 
                     <label>Output: </label>
-                    <input name="estado" class= "campo_saida" type="radio" checked="checked"><label>Ligado </label>
-                    <input name="estado" class= "campo_saida" type="radio"><label>Desligado </label><br><br>
+                    <input name="estado_ligado" class= "campo_saida" type="radio" checked="checked"><label>Ligado </label>
+                    <input name="estado_desligado" class= "campo_saida" type="radio"><label>Desligado </label><br><br>
                     <input class="btn_submit" type="submit" value="Atualizar" name="pwm0">
                   </form>
                   
