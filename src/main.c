@@ -6,6 +6,7 @@
 #include "driver/ledc.h"            //PWM
 #include <math.h>                   //Função log
 #include <sys/param.h>              //Função MIN
+#include <string.h>
 
 
 
@@ -46,6 +47,19 @@ static EventGroupHandle_t s_wifi_event_group;
 //Handle do server http
 static httpd_handle_t server =NULL;
 
+struct parametros_pwm{
+    bool estado;
+    int frequencia;
+    int percentual_duty;
+}parametros_pwm;
+
+
+
+/*-------------------------------------------------Variáveis Globais-----------------------------------------*/
+static struct parametros_pwm pwm[2]={{0,5000,50}, {0,5000,50}};
+
+
+
 
 /*-----------------------------------------------Declaração das Funções--------------------------------------*/
 
@@ -69,7 +83,7 @@ static int calc_resolucao_duty(long double pwm_freq,long double timer_clk_freq);
 static httpd_handle_t start_webserver(void);
 
 //Imprimimos a Webpage
-static void print_webpage(httpd_req_t *req);
+static void print_webpage(httpd_req_t *req,struct parametros_pwm *pwm);
 
 //handler do Get da Página Principal
 static esp_err_t main_page_get_handler(httpd_req_t *req);
@@ -77,6 +91,7 @@ static esp_err_t main_page_get_handler(httpd_req_t *req);
 //handler do formulário html do pwm0
 static esp_err_t pwm_post_handler(httpd_req_t *req);
 
+static void processa_post_request(struct parametros_pwm *pwm,char *content);
 
 static void atualiza_PWM(int pwm_index,uint32_t frequencia, uint32_t percentual_duty);
 
@@ -101,6 +116,8 @@ static const httpd_uri_t post_pwm = {
 };
 
 
+/*-----------------------------------------Função Main--------------------------------------------------------*/
+
 void app_main() {
     setup_PWM();                    //configura os canais e timers do PWM0
     setup_nvs();                    //inicia a memória nvs necessária para uso do wireless
@@ -112,8 +129,7 @@ void app_main() {
 
 }
 
-/*-------------------------------------Implementação das Funções----------------------------------------------*/
-
+/*-------------------------------Implementação das Funções Auxiliares-----------------------------------------*/
 
 //Realiza as configurações iniciais do PWM baseado na documentação de Espressiv:
 //https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/ledc.html
@@ -280,7 +296,6 @@ void wifi_init_sta()
 
 
 
-
 /*--------------Cria o Server, Faz as configurações Padrão e Inicia os URI Handlers--------------*/
 static httpd_handle_t start_webserver(void)
 {
@@ -303,16 +318,8 @@ static httpd_handle_t start_webserver(void)
 }
 
 /*---Essa função concatena a página web como um vetor char e a envia como resposta da requisição req---*/
-static void print_webpage(httpd_req_t *req)
+static void print_webpage(httpd_req_t *req,struct parametros_pwm *pwm)
 {
-    int pwm0_freq=5000;
-    int pwm1_freq=5000;
-    int pwm0_duty=50;
-    int pwm1_duty=50;
-    bool status_pwm1=true;
-    bool status_pwm0=true;
-
-    //variaveis=freq,duty
 
     char *buffer;
     buffer = (char *) malloc(4000);
@@ -320,44 +327,44 @@ static void print_webpage(httpd_req_t *req)
     const char *index_html_part1= "<!DOCTYPE html><html><head><meta content=\"text/html;charset=utf-8\" http-equiv=\"Content-Type\"> <meta content=\"utf-8\" http-equiv=\"encoding\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><link rel=\"icon\" href=\"data:,\"> <title>Projeto 10 - Gerador PWM controlado via Wireless</title><style>html{color: #ffffff;font-family: Verdana;text-align: center;background-color:#272727fd}.wrap {padding-top: 2.5%;padding-right: 2.5%;padding-left: 2.5%;width: 95%;overflow:auto;}.fleft {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float:left; width: 47.5%;background: rgb(95, 95, 95);height:fit-content;padding-bottom: 3%;}.fright {border-style: solid;border-radius: 1px;border-width: 2px;border-color: #bdbdbd;float: right;width: 47.5%;background:rgb(95, 95, 95);height:fit-content;padding-bottom: 3%; } .fcenter {float: center;width: 5%; background:#272727fd;height:fit-content; padding-bottom: 3%;}.formulario{padding: 0px 0px;float: center;width: 95%;text-align:center;}.campo_freq{width: 30%;text-align: center;font-family:sans-serif;font-size: 14px;font-weight: bold;border-style: solid;border-radius: 1px;border-width: 3px;border-color: #000000;}.campo_duty{-webkit-appearance: none;width: 28%;height: 5px;background: #ffffff;outline: none;opacity: 1;-webkit-transition: .2s;transition: opacity .2s;    }.campo_duty::-webkit-slider-thumb{-webkit-appearance: none;appearance: none;background: #04AA6D;}.btn_submit{text-align: center;background-color: #02500f;font-size: 20px;font-family: sans-serif;font-weight: bold;color: #ffffff;border-style: solid; border-radius: 1px;border-width: 3px;border-color: #ffffff;} </style> </head> <body><h2>Projeto 10 - Gerador PWM controlado via Wireless</h2><div class=\"wrap\"><div class=\"fleft\"><h3>PWM 0</h3><form class=\"formulario\" method=\"post\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" id=\"freq\" name=\"freq\" value=";
 
     char pwm0frequencia[10];
-    sprintf(pwm0frequencia, "\"%d\"", pwm0_freq);
+    sprintf(pwm0frequencia, "\"%d\"", pwm[0].frequencia);
 
     const char *index_html_part2= "autocomplete=\"off\"><label>  Hz </label><br><br> <label>Duty Cicle:&#160; </label><input class=\"campo_duty\" type=\"range\" min=\"0\" max=\"100\"  value=";
 
     char pwm0percentual[6];
-    sprintf(pwm0percentual, "\"%d\"", pwm0_duty);
+    sprintf(pwm0percentual, "\"%d\"", pwm[0].percentual_duty);
     
-    const char *index_html_part3="name=\"duty\" id=\"duty\"><label> <span id=\"demo\"></span>%</label><br><br><label>Output: </label><input name=\"estado\" class= \"campo_saida\" type=\"radio\" ";
+    const char *index_html_part3="name=\"duty0\" id=\"duty0\"><label> <span id=\"demo\"></span>%</label><br><br><label>Output: </label><input name=\"estado\" id=\"1\" value=\"ligado\" class= \"campo_saida\" type=\"radio\" ";
 
     const char *pwmchecked="checked=\"checked\"";
     
-    const char *index_html_part4="><label>Ligado </label><input name=\"estado\"  class= \"campo_saida\" type=\"radio\"";
+    const char *index_html_part4="><label>Ligado </label><input name=\"estado\" id=\"2\" value=\"desligado\"  class= \"campo_saida\" type=\"radio\"";
 
     const char *index_html_part5="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\" name=\"pwm0\"></form>  </div><div class=\"fright\"><h3>PWM 1</h3><form class=\"formulario\" method=\"post\"><label>Frequência: </label><input class=\"campo_freq\" type=\"text\" id=\"freq\" name=\"freq\" value=";
     
     char pwm1frequencia[10];
-    sprintf(pwm1frequencia, "\"%d\"", pwm1_freq);
+    sprintf(pwm1frequencia, "\"%d\"", pwm[1].frequencia);
     
     const char *index_html_part6="autocomplete=\"off\"><label>  Hz </label><br><br> <label>Duty Cicle:&#160; </label><input class=\"campo_duty\" type=\"range\" min=\"0\" max=\"100\" value=";
     
     char pwm1percentual[6];
-    sprintf(pwm1percentual, "\"%d\"", pwm1_duty);
+    sprintf(pwm1percentual, "\"%d\"", pwm[1].percentual_duty);
     
-    const char *index_html_part7="name=\"duty2\"id=\"duty2\"><label> <span id=\"demo2\"></span>%</label><br><br><label>Output: </label>   <input name=\"estado\" class= \"campo_saida\" type=\"radio\"";
+    const char *index_html_part7="name=\"duty1\"id=\"duty1\"><label> <span id=\"demo2\"></span>%</label><br><br><label>Output: </label>   <input name=\"estado\"id=\"2\" value=\"ligado\"class= \"campo_saida\" type=\"radio\"";
     
-    const char *index_html_part8="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\" name=\"pwm1\"></form></div></div><script>var slider = document.getElementById(\"duty\");var output = document.getElementById(\"demo\");output.innerHTML = slider.value;slider.oninput = function() {output.innerHTML = this.value;}; var slider2 = document.getElementById(\"duty2\");var output2 = document.getElementById(\"demo2\");output2.innerHTML = slider2.value;slider2.oninput = function() {output2.innerHTML = this.value;}</script></body></html>";
+    const char *index_html_part8="><label>Desligado </label><br><br><input class=\"btn_submit\" type=\"submit\" value=\"Atualizar\" name=\"pwm1\"></form></div></div><script>var slider = document.getElementById(\"duty0\");var output = document.getElementById(\"demo\");output.innerHTML = slider.value;slider.oninput = function() {output.innerHTML = this.value;}; var slider2 = document.getElementById(\"duty1\");var output2 = document.getElementById(\"demo2\");output2.innerHTML = slider2.value;slider2.oninput = function() {output2.innerHTML = this.value;}</script></body></html>";
    
     strcpy(buffer, index_html_part1);
     strcat(buffer, pwm0frequencia);
     strcat(buffer, index_html_part2);
     strcat(buffer, pwm0percentual);
     strcat(buffer, index_html_part3);
-    if(status_pwm0)
+    if(pwm[0].estado)
     {
         strcat(buffer, pwmchecked);
     }
     strcat(buffer, index_html_part4);
-    if(!status_pwm0)
+    if(!pwm[0].estado)
     {
         strcat(buffer, pwmchecked);
     }
@@ -366,12 +373,12 @@ static void print_webpage(httpd_req_t *req)
     strcat(buffer, index_html_part6);
     strcat(buffer, pwm1percentual);
     strcat(buffer, index_html_part7);
-    if(status_pwm1)
+    if(pwm[1].estado)
     {
         strcat(buffer, pwmchecked);
     }
     strcat(buffer, index_html_part4);
-    if(!status_pwm1)
+    if(!pwm[1].estado)
     {
         strcat(buffer, pwmchecked);
     }
@@ -390,7 +397,7 @@ static void print_webpage(httpd_req_t *req)
 static esp_err_t main_page_get_handler(httpd_req_t *req)
 {
     //imprime a página
-    print_webpage(req);
+    print_webpage(req,pwm);
     //retorna OK
     return ESP_OK;
 }
@@ -405,6 +412,7 @@ static esp_err_t pwm_post_handler(httpd_req_t *req)
      * content length would give length of string */
     char content[100];
     ESP_LOGI(TAG,"pre pwm");
+    ESP_LOGI(TAG,"pwm parametros %d %d %d",pwm[1].estado,pwm[1].frequencia,pwm[1].percentual_duty);
 
     /* Truncate if content length larger than the buffer */
     size_t recv_size = MIN(req->content_len, sizeof(content));
@@ -423,14 +431,46 @@ static esp_err_t pwm_post_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
     ESP_LOGI(TAG,"Vetor resposta: %s",content);
-
+    processa_post_request(pwm,content);
+    ESP_LOGI(TAG,"pwm parametros %d %d %d",pwm[0].estado,pwm[0].frequencia,pwm[0].percentual_duty);
+    ESP_LOGI(TAG,"pwm parametros %d %d %d",pwm[1].estado,pwm[1].frequencia,pwm[1].percentual_duty);
     /* Send a simple response */
     ESP_LOGI(TAG,"post pwm");
-    print_webpage(req);
+    print_webpage(req,pwm);
     return ESP_OK;
 }
 
+static void processa_post_request(struct parametros_pwm *pwm,char *content)
+{
+    int index;
+    if (strstr(content, "pwm0"))
+         index=0;
+    else 
+         index=1;
 
+    if (strstr(content, "desligado"))
+        pwm[index].estado=0;
+    else
+        pwm[index].estado=1;
+     
+    //O numero de dígitos que a variável frequência possui
+    int tamanho_freq=strchr(strstr(content, "freq"), '&')- strchr(strstr(content, "freq"), '=')-1;
+    //variavel para armazenar a string da frequencia
+    char frequencia[10];
+    //copia a frequencia que chegou no vetor 'content' para a string
+    strncpy(frequencia, (strchr(strstr(content, "freq"), '=')+1), tamanho_freq);
+    //converte a string frequencia em int e salva
+    pwm[index].frequencia=atoi(frequencia);
+
+    //O numero de dígitos que a variável percentual_duty possui
+    int tamanho_duty=strchr(strstr(content, "duty"), '&')- strchr(strstr(content, "duty"), '=')-1;
+    //variavel para armazenar a string do duty
+    char duty[10];
+    //copia o duty que chegou no vetor 'content' para a string
+    strncpy(duty, (strchr(strstr(content, "duty"), '=')+1), tamanho_duty);
+    //converte a string duty em int e salva
+    pwm[index].percentual_duty=atoi(duty);
+}
 
 
 //retorna o log na base 2 do valor recebido
