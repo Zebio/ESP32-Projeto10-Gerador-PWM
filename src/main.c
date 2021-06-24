@@ -140,7 +140,7 @@ static void setup_PWM()
     ledc_timer_config_t pwm_timer_config = { //Configurações do PWM0
         .duty_resolution =   LEDC_TIMER_4_BIT,       // resolução do duty do PWM
         .freq_hz =           5000,                   // frequencia do sinal PWM
-        .speed_mode =        LEDC_LOW_SPEED_MODE,   // modo do timer
+        .speed_mode =        LEDC_HIGH_SPEED_MODE,   // modo do timer
         .timer_num =         LEDC_TIMER_0,           // identificador do timer
         .clk_cfg =           LEDC_USE_APB_CLK,       // fonte de clock
     };
@@ -434,6 +434,8 @@ static esp_err_t pwm_post_handler(httpd_req_t *req)
     processa_post_request(pwm,content);
     ESP_LOGI(TAG,"pwm parametros %d %d %d",pwm[0].estado,pwm[0].frequencia,pwm[0].percentual_duty);
     ESP_LOGI(TAG,"pwm parametros %d %d %d",pwm[1].estado,pwm[1].frequencia,pwm[1].percentual_duty);
+    atualiza_PWM(pwm[0].estado,pwm[0].frequencia, pwm[0].percentual_duty);
+    atualiza_PWM(pwm[1].estado,pwm[1].frequencia, pwm[1].percentual_duty);
     /* Send a simple response */
     ESP_LOGI(TAG,"post pwm");
     print_webpage(req,pwm);
@@ -499,7 +501,9 @@ static void atualiza_PWM(int pwm_index,uint32_t frequencia, uint32_t percentual_
     
     timer_clk_freq=80000000;
 
-    uint32_t resolucao_duty= calc_resolucao_duty(frequencia,timer_clk_freq);
+
+   // uint32_t resolucao_duty= calc_resolucao_duty(frequencia,timer_clk_freq);
+    uint32_t resolucao_duty=4;
 
     ESP_LOGI(TAG,"Atualizar PWM: Freq: %d, Duty: %d, Resolução: %d",
             frequencia,
